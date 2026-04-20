@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<plugin>
+    <author>Your Name</author>
+    <description>OGDF C++ Integration</description>
+    <plugindesc>
+        <name>OGDF Layout</name>
+        <main>ogdf.integration.OgdfTestPlugin</main>
+        <version>1.0</version>
+        <available>Yes</available>
+    </plugindesc>
+</plugin>

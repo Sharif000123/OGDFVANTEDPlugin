@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<addon>
+    <name>OGDF Layout Integration</name>
+    <description>Connects VANTED to the local OGDF C++ engine.</description>
+    <author>Your Name</author>
+    <version>1.0</version>
+    
+    <main>ogdf.integration.OgdfTestPlugin</main>
+</addon>

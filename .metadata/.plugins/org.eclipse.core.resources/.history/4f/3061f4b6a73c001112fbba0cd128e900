@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<!DOCTYPE plugin PUBLIC "-//GRAFFITI/DTD Plugin XML V1.0//EN" "http://graffiti.infosun.fmi.uni-passau.de/dtd/1.0/plugin.dtd">
+<plugin>
+    <author>Your Name</author>
+    <description>OGDF C++ Integration</description>
+    <plugindesc>
+        <name>OGDF Layout</name>
+        <main>ogdf.integration.OgdfTestPlugin</main>
+        <version>1.0</version>
+        <available>Yes</available>
+    </plugindesc>
+</plugin>
