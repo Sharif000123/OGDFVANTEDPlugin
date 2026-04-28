@@ -9,6 +9,7 @@
 #include <ogdf/basic/Graph.h>
 #include <ogdf/basic/GraphAttributes.h>
 #include <ogdf/basic/LayoutStatistics.h>
+#include <ogdf/basic/graph_generators.h>
 #include <ogdf/basic/simple_graph_alg.h>
 #include <ogdf/energybased/DavidsonHarelLayout.h>
 #include <ogdf/energybased/FMMMLayout.h>
@@ -35,6 +36,16 @@ struct LayoutRequest {
     double pageRatio = 1.0;
     bool transpose = true;
     bool includeMetrics = true;
+};
+
+struct GeneratorRequest {
+    std::string generator = "random_simple_probability";
+    int nodes = 12;
+    int edges = 16;
+    int secondary = 4;
+    double probability = 0.25;
+    bool directed = false;
+    bool labels = true;
 };
 
 std::string readAllStdin() {
@@ -151,6 +162,25 @@ LayoutRequest parseLayoutRequest(const std::string& graphMl) {
     return request;
 }
 
+bool isGenerateRequest(const std::string& graphMl) {
+    return toLower(graphDataValue(graphMl, "k_ogdf_mode")) == "generate";
+}
+
+GeneratorRequest parseGeneratorRequest(const std::string& graphMl) {
+    GeneratorRequest request;
+    const std::string generator = graphDataValue(graphMl, "k_ogdf_generator");
+    if (!generator.empty()) {
+        request.generator = toLower(generator);
+    }
+    request.nodes = parseInt(graphDataValue(graphMl, "k_ogdf_generator_nodes"), request.nodes);
+    request.edges = parseInt(graphDataValue(graphMl, "k_ogdf_generator_edges"), request.edges);
+    request.secondary = parseInt(graphDataValue(graphMl, "k_ogdf_generator_secondary"), request.secondary);
+    request.probability = parseDouble(graphDataValue(graphMl, "k_ogdf_generator_probability"), request.probability);
+    request.directed = parseBool(graphDataValue(graphMl, "k_ogdf_generator_directed"), request.directed);
+    request.labels = parseBool(graphDataValue(graphMl, "k_ogdf_generator_labels"), request.labels);
+    return request;
+}
+
 void ensureNodeSizes(ogdf::GraphAttributes& ga) {
     for (ogdf::node v : ga.constGraph().nodes) {
         if (!(ga.width(v) > 0.0)) {
@@ -188,6 +218,16 @@ void ensureFiniteNodePositions(ogdf::GraphAttributes& ga) {
             ga.x(v) = static_cast<double>((index % 10) * 80);
             ga.y(v) = static_cast<double>((index / 10) * 80);
         }
+        ++index;
+    }
+}
+
+void applyGridCoordinates(ogdf::GraphAttributes& ga, int columns) {
+    const int safeColumns = std::max(1, columns);
+    int index = 0;
+    for (ogdf::node v : ga.constGraph().nodes) {
+        ga.x(v) = static_cast<double>((index % safeColumns) * 90);
+        ga.y(v) = static_cast<double>((index / safeColumns) * 90);
         ++index;
     }
 }
@@ -297,6 +337,81 @@ void runSelectedLayout(ogdf::GraphAttributes& ga, const LayoutRequest& request) 
     }
 }
 
+void applyGeneratedLayout(ogdf::GraphAttributes& ga, const std::string& generator, int secondary) {
+    if (ga.constGraph().numberOfNodes() == 0) {
+        return;
+    }
+    if (generator == "grid") {
+        applyGridCoordinates(ga, secondary);
+        return;
+    }
+
+    LayoutRequest request;
+    request.includeMetrics = false;
+    request.iterations = 200;
+    request.secondaryIterations = 0;
+    request.layout = (generator == "random_tree" || generator == "regular_tree") ? "tree" : "fmmm";
+    try {
+        runSelectedLayout(ga, request);
+    } catch (...) {
+        LayoutRequest fallback;
+        fallback.includeMetrics = false;
+        fallback.layout = "circular";
+        runSelectedLayout(ga, fallback);
+    }
+}
+
+void setGeneratedAttributes(ogdf::GraphAttributes& ga, bool labels) {
+    int index = 0;
+    for (ogdf::node v : ga.constGraph().nodes) {
+        ga.idNode(v) = index;
+        ga.width(v) = 25.0;
+        ga.height(v) = 25.0;
+        if (labels) {
+            ga.label(v) = std::to_string(index + 1);
+        }
+        ++index;
+    }
+}
+
+void generateGraph(ogdf::Graph& g, const GeneratorRequest& request) {
+    const std::string id = toLower(request.generator);
+    const int n = std::max(0, request.nodes);
+    const int secondary = std::max(1, request.secondary);
+    const double probability = std::min(1.0, std::max(0.0, request.probability));
+    const long maxEdges = n > 1 ? (static_cast<long>(n) * static_cast<long>(n - 1)) / 2L : 0L;
+    const int m = static_cast<int>(std::min<long>(std::max(0, request.edges), maxEdges));
+
+    if (id == "random_simple_probability") {
+        if (request.directed) {
+            ogdf::randomDigraph(g, n, probability);
+        } else if (!ogdf::randomSimpleGraphByProbability(g, n, probability)) {
+            throw std::runtime_error("Could not generate random G(n,p) graph.");
+        }
+    } else if (id == "random_simple_edges") {
+        if (!ogdf::randomSimpleGraph(g, n, m)) {
+            throw std::runtime_error("Could not generate random G(n,m) graph.");
+        }
+    } else if (id == "random_connected") {
+        const int connectedEdges = n <= 1 ? 0 : std::max(n - 1, m);
+        if (!ogdf::randomSimpleConnectedGraph(g, n, connectedEdges)) {
+            throw std::runtime_error("Could not generate connected graph.");
+        }
+    } else if (id == "random_tree") {
+        ogdf::randomTree(g, n);
+    } else if (id == "regular_tree") {
+        ogdf::regularTree(g, n, secondary);
+    } else if (id == "planar_connected") {
+        ogdf::randomPlanarConnectedGraph(g, n, m);
+    } else if (id == "complete") {
+        ogdf::completeGraph(g, n);
+    } else if (id == "grid") {
+        ogdf::gridGraph(g, std::max(1, n), secondary, false, false);
+    } else {
+        throw std::runtime_error("Unsupported OGDF graph generator: " + request.generator);
+    }
+}
+
 void emitMetrics(const ogdf::Graph& g, ogdf::GraphAttributes& ga) {
     const ogdf::EdgeArray<size_t> bendsPerEdge = ogdf::LayoutStatistics::numberOfBends(ga);
     const ogdf::NodeArray<size_t> overlapsPerNode = ogdf::LayoutStatistics::numberOfNodeOverlaps(ga);
@@ -342,7 +457,6 @@ int main() {
         std::cin.tie(nullptr);
 
         const std::string graphMlInput = readAllStdin();
-        LayoutRequest request = parseLayoutRequest(graphMlInput);
 
         ogdf::Graph g;
         const long attributes = ogdf::GraphAttributes::nodeGraphics
@@ -352,18 +466,28 @@ int main() {
                 | ogdf::GraphAttributes::nodeId;
         ogdf::GraphAttributes ga(g, attributes);
 
-        std::istringstream input(graphMlInput);
-        if (!ogdf::GraphIO::readGraphML(ga, g, input)) {
-            std::cerr << "Error: Could not read GraphML input from stdin." << std::endl;
-            return 2;
-        }
+        if (isGenerateRequest(graphMlInput)) {
+            GeneratorRequest generatorRequest = parseGeneratorRequest(graphMlInput);
+            generateGraph(g, generatorRequest);
+            setGeneratedAttributes(ga, generatorRequest.labels);
+            ensureNodeSizes(ga);
+            applyGeneratedLayout(ga, toLower(generatorRequest.generator), generatorRequest.secondary);
+            ensureFiniteNodePositions(ga);
+        } else {
+            LayoutRequest request = parseLayoutRequest(graphMlInput);
+            std::istringstream input(graphMlInput);
+            if (!ogdf::GraphIO::readGraphML(ga, g, input)) {
+                std::cerr << "Error: Could not read GraphML input from stdin." << std::endl;
+                return 2;
+            }
 
-        ensureNodeSizes(ga);
-        runSelectedLayout(ga, request);
-        ensureFiniteNodePositions(ga);
+            ensureNodeSizes(ga);
+            runSelectedLayout(ga, request);
+            ensureFiniteNodePositions(ga);
 
-        if (request.includeMetrics) {
-            emitMetrics(g, ga);
+            if (request.includeMetrics) {
+                emitMetrics(g, ga);
+            }
         }
 
         if (!ogdf::GraphIO::writeGraphML(ga, std::cout)) {

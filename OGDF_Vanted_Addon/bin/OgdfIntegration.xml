@@ -6,9 +6,9 @@
 
 <plugin>
     <author>Your Name</author>
-    <description>OGDF C++ Integration</description>
+    <description>OGDF C++ Integration for layouts and graph generation</description>
     <plugindesc>
-        <name>OGDF Layout</name>
+        <name>OGDF Integration</name>
         <main>ogdf.integration.OgdfTestPlugin</main>
         <version>1.0</version>
         <available>http://www.vanted.org</available>

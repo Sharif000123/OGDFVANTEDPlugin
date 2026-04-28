@@ -1501,7 +1501,7 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
     }
 
     // Locates OGDF executable and native runtime libraries from several sources.
-    private static RuntimeConfig resolveRuntimeConfig() {
+    static RuntimeConfig resolveRuntimeConfig() {
         File addonDir = resolveAddonDirectory();
         File ogdfDir = firstDirectoryFile(
                 System.getProperty(PROP_OGDF_DIR),
@@ -1531,7 +1531,7 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
     }
 
     // Prompts once for the OGDF directory and searches known CMake output paths.
-    private static RuntimeConfig chooseOgdfDirectoryAndRemember(RuntimeConfig current) {
+    static RuntimeConfig chooseOgdfDirectoryAndRemember(RuntimeConfig current) {
         if (!isUiAvailable()) {
             return current;
         }
@@ -1576,7 +1576,7 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
     }
 
     // Starts OGDF with an environment that can find native libraries.
-    private static Process startOgdfProcess(RuntimeConfig runtime) throws IOException {
+    static Process startOgdfProcess(RuntimeConfig runtime) throws IOException {
         ProcessBuilder pb = new ProcessBuilder(runtime.executablePath);
         configureProcessEnvironment(pb, runtime);
         try {
@@ -1964,7 +1964,7 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
     }
 
     // Drains process output while OGDF is still running, preventing large GraphML responses from blocking the process.
-    private static Thread startStreamReader(InputStream in, ByteArrayOutputStream buffer, String threadName) {
+    static Thread startStreamReader(InputStream in, ByteArrayOutputStream buffer, String threadName) {
         Thread thread = new Thread(() -> {
             try {
                 copyAll(in, buffer);
@@ -1985,14 +1985,14 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
         }
     }
 
-    private static String bufferToString(ByteArrayOutputStream buffer) throws IOException {
+    static String bufferToString(ByteArrayOutputStream buffer) throws IOException {
         return buffer.toString(StandardCharsets.UTF_8.name());
     }
 
     // Simple data holders for runtime config and parsed layout results.
-    private static final class RuntimeConfig {
-        private final String executablePath;
-        private final String runtimeDirectory;
+    static final class RuntimeConfig {
+        final String executablePath;
+        final String runtimeDirectory;
 
         private RuntimeConfig(String executablePath, String runtimeDirectory) {
             this.executablePath = executablePath;
