@@ -191,7 +191,7 @@ public class OgdfGraphGeneratorAlgorithm extends AbstractAlgorithm {
             return;
         }
 
-        Thread worker = new Thread(() -> runGenerator(options), "OGDF graph generator");
+        Thread worker = new Thread(() -> runGenerator(options), "Generate Graph using OGDF");
         worker.setDaemon(true);
         worker.start();
     }
@@ -748,7 +748,7 @@ public class OgdfGraphGeneratorAlgorithm extends AbstractAlgorithm {
 
     private static boolean showGeneratorDialog(JPanel contentPanel) {
         final boolean[] accepted = new boolean[] {false};
-        JDialog dialog = new JDialog((Window) null, "OGDF Graph Generator", java.awt.Dialog.ModalityType.APPLICATION_MODAL);
+        JDialog dialog = new JDialog((Window) null, "Generate Graph using OGDF", java.awt.Dialog.ModalityType.APPLICATION_MODAL);
         JPanel rootPanel = new JPanel(new BorderLayout(0, 10));
         rootPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
         JScrollPane scrollPane = new JScrollPane(contentPanel);

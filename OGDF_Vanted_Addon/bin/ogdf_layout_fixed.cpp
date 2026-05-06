@@ -1,7 +1,10 @@
 #include <algorithm>
+#include <chrono>
 #include <cctype>
 #include <cmath>
+#include <iomanip>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -164,6 +167,10 @@ LayoutRequest parseLayoutRequest(const std::string& graphMl) {
 
 bool isGenerateRequest(const std::string& graphMl) {
     return toLower(graphDataValue(graphMl, "k_ogdf_mode")) == "generate";
+}
+
+bool isMetricsRequest(const std::string& graphMl) {
+    return toLower(graphDataValue(graphMl, "k_ogdf_mode")) == "metrics";
 }
 
 GeneratorRequest parseGeneratorRequest(const std::string& graphMl) {
@@ -412,39 +419,175 @@ void generateGraph(ogdf::Graph& g, const GeneratorRequest& request) {
     }
 }
 
-void emitMetrics(const ogdf::Graph& g, ogdf::GraphAttributes& ga) {
+void emitMetric(std::ostream& out, const std::string& key, double value) {
+    if (std::isfinite(value)) {
+        out << ' ' << key << '=' << std::setprecision(10) << value;
+    }
+}
+
+void emitMetric(std::ostream& out, const std::string& key, size_t value) {
+    out << ' ' << key << '=' << value;
+}
+
+void emitMetric(std::ostream& out, const std::string& key, int value) {
+    out << ' ' << key << '=' << value;
+}
+
+double safeDensity(size_t n, size_t m, bool directed) {
+    if (n < 2) {
+        return 0.0;
+    }
+    const double possibleEdges = directed
+            ? static_cast<double>(n) * static_cast<double>(n - 1)
+            : (static_cast<double>(n) * static_cast<double>(n - 1)) / 2.0;
+    return possibleEdges > 0.0 ? static_cast<double>(m) / possibleEdges : 0.0;
+}
+
+double drawingArea(const ogdf::GraphAttributes& ga) {
+    if (ga.constGraph().numberOfNodes() < 1) {
+        return 0.0;
+    }
+    const ogdf::DRect bounds = ga.boundingBox();
+    return bounds.width() * bounds.height();
+}
+
+void emitMetrics(const ogdf::Graph& g, ogdf::GraphAttributes& ga, long long layoutRuntimeMs,
+        const std::string& runtimeMetricKey) {
+    const size_t nodeCount = static_cast<size_t>(g.numberOfNodes());
+    const size_t edgeCount = static_cast<size_t>(g.numberOfEdges());
     const ogdf::EdgeArray<size_t> bendsPerEdge = ogdf::LayoutStatistics::numberOfBends(ga);
     const ogdf::NodeArray<size_t> overlapsPerNode = ogdf::LayoutStatistics::numberOfNodeOverlaps(ga);
 
     size_t crossingSum = 0;
+    size_t nodeCrossingSum = 0;
     size_t bendCount = 0;
-    const int crossingMetricEdgeLimit = 2000;
-    const bool calculateCrossings = g.numberOfEdges() <= crossingMetricEdgeLimit;
+    const size_t crossingMetricEdgeLimit = 2000;
+    const size_t pairMetricNodeLimit = 2000;
+    const bool calculateCrossings = edgeCount <= crossingMetricEdgeLimit;
+    const bool calculateNodeCrossings = edgeCount <= crossingMetricEdgeLimit && nodeCount <= pairMetricNodeLimit;
     if (calculateCrossings) {
         const ogdf::EdgeArray<size_t> crossingsPerEdge = ogdf::LayoutStatistics::numberOfCrossings(ga);
         for (ogdf::edge e : g.edges) {
             crossingSum += crossingsPerEdge[e];
         }
     } else {
-        std::cerr << "Warning: skipped crossing metric for graph with "
-                  << static_cast<size_t>(g.numberOfEdges()) << " edges." << std::endl;
+        std::cerr << "Warning: skipped crossing metric for graph with " << edgeCount << " edges." << std::endl;
+    }
+    if (calculateNodeCrossings) {
+        const ogdf::EdgeArray<size_t> nodeCrossingsPerEdge = ogdf::LayoutStatistics::numberOfNodeCrossings(ga);
+        for (ogdf::edge e : g.edges) {
+            nodeCrossingSum += nodeCrossingsPerEdge[e];
+        }
+    } else {
+        std::cerr << "Warning: skipped node-crossing metric for graph with "
+                  << nodeCount << " nodes and " << edgeCount << " edges." << std::endl;
     }
 
+    double minEdgeLength = std::numeric_limits<double>::infinity();
+    double maxEdgeLength = 0.0;
+    double edgeLengthSum = 0.0;
+    const ogdf::EdgeArray<double> edgeLengths = ogdf::LayoutStatistics::edgeLengths(ga);
     for (ogdf::edge e : g.edges) {
         bendCount += bendsPerEdge[e];
+        const double length = edgeLengths[e];
+        if (std::isfinite(length)) {
+            minEdgeLength = std::min(minEdgeLength, length);
+            maxEdgeLength = std::max(maxEdgeLength, length);
+            edgeLengthSum += length;
+        }
+    }
+    const double avgEdgeLength = edgeCount > 0 ? edgeLengthSum / static_cast<double>(edgeCount) : 0.0;
+    if (!std::isfinite(minEdgeLength)) {
+        minEdgeLength = 0.0;
     }
 
     size_t overlapSum = 0;
+    size_t isolatedNodes = 0;
+    size_t minDegree = nodeCount > 0 ? std::numeric_limits<size_t>::max() : 0;
+    size_t maxDegree = 0;
+    size_t degreeSum = 0;
     for (ogdf::node v : g.nodes) {
+        const size_t degree = static_cast<size_t>(v->degree());
+        if (degree == 0) {
+            isolatedNodes++;
+        }
+        minDegree = std::min(minDegree, degree);
+        maxDegree = std::max(maxDegree, degree);
+        degreeSum += degree;
         overlapSum += overlapsPerNode[v];
     }
+    if (nodeCount == 0) {
+        minDegree = 0;
+    }
+    const double avgDegree = nodeCount > 0 ? static_cast<double>(degreeSum) / static_cast<double>(nodeCount) : 0.0;
 
-    std::cerr << "OGDF_METRIC bends=" << bendCount
-              << " nodeOverlaps=" << (overlapSum / 2)
-              << " nodes=" << static_cast<size_t>(g.numberOfNodes())
-              << " edges=" << static_cast<size_t>(g.numberOfEdges());
+    ogdf::EdgeArray<double> edgeLengthDeviationPerEdge(g);
+    const double edgeLengthDeviation = ogdf::LayoutStatistics::edgeLengthDeviation(ga, edgeLengthDeviationPerEdge);
+
+    double neighbourhoodPreservationAvg = 0.0;
+    if (nodeCount > 0 && nodeCount <= pairMetricNodeLimit) {
+        const ogdf::NodeArray<double> neighbourhood = ogdf::LayoutStatistics::neighbourhoodPreservation(ga);
+        double sum = 0.0;
+        for (ogdf::node v : g.nodes) {
+            sum += neighbourhood[v];
+        }
+        neighbourhoodPreservationAvg = sum / static_cast<double>(nodeCount);
+    }
+
+    double gabrielRatioAvg = 0.0;
+    const bool calculateGabrielRatio = nodeCount > 0 && nodeCount <= 500 && (nodeCount * std::max<size_t>(edgeCount, 1)) <= 1000000;
+    if (calculateGabrielRatio) {
+        ogdf::Graph gabrielGraphReference;
+        const ogdf::NodeArray<double> gabrielRatios = ogdf::LayoutStatistics::gabrielRatio(ga, gabrielGraphReference);
+        double sum = 0.0;
+        for (ogdf::node v : g.nodes) {
+            sum += gabrielRatios[v];
+        }
+        gabrielRatioAvg = sum / static_cast<double>(nodeCount);
+    }
+
+    std::cerr << "OGDF_METRIC";
+    emitMetric(std::cerr, "nodes", nodeCount);
+    emitMetric(std::cerr, "edges", edgeCount);
+    emitMetric(std::cerr, "density", safeDensity(nodeCount, edgeCount, ga.directed()));
+    emitMetric(std::cerr, "components", ogdf::connectedComponents(g));
+    emitMetric(std::cerr, "isolatedNodes", isolatedNodes);
+    emitMetric(std::cerr, "avgDegree", avgDegree);
+    emitMetric(std::cerr, "minDegree", minDegree);
+    emitMetric(std::cerr, "maxDegree", maxDegree);
+    emitMetric(std::cerr, "bends", bendCount);
+    emitMetric(std::cerr, "nodeOverlaps", overlapSum / 2);
+    if (!runtimeMetricKey.empty()) {
+        emitMetric(std::cerr, runtimeMetricKey, static_cast<size_t>(std::max<long long>(0, layoutRuntimeMs)));
+    }
+    emitMetric(std::cerr, "graphArea", drawingArea(ga));
+    emitMetric(std::cerr, "aspectRatio", ogdf::LayoutStatistics::aspectRatio(ga));
+    emitMetric(std::cerr, "minEdgeLength", minEdgeLength);
+    emitMetric(std::cerr, "avgEdgeLength", avgEdgeLength);
+    emitMetric(std::cerr, "maxEdgeLength", maxEdgeLength);
+    emitMetric(std::cerr, "edgeLengthDeviation", edgeLengthDeviation);
+    emitMetric(std::cerr, "nodeResolution", ogdf::LayoutStatistics::nodeResolution(ga));
+    emitMetric(std::cerr, "angularResolution", ogdf::LayoutStatistics::angularResolution(ga));
+    emitMetric(std::cerr, "nodeUniformity", ogdf::LayoutStatistics::nodeUniformity(ga));
+    emitMetric(std::cerr, "edgeOrthogonality", ogdf::LayoutStatistics::edgeOrthogonality(ga));
+    emitMetric(std::cerr, "closestPairDistance", ogdf::LayoutStatistics::closestPairOfPoints(ga));
+    emitMetric(std::cerr, "horizontalBalance", ogdf::LayoutStatistics::horizontalVerticalBalance(ga, false));
+    emitMetric(std::cerr, "verticalBalance", ogdf::LayoutStatistics::horizontalVerticalBalance(ga, true));
+    emitMetric(std::cerr, "nodeOrthogonality", ogdf::LayoutStatistics::nodeOrthogonality(ga));
+    emitMetric(std::cerr, "neighbourhoodPreservation", neighbourhoodPreservationAvg);
+    if (calculateGabrielRatio) {
+        emitMetric(std::cerr, "gabrielRatio", gabrielRatioAvg);
+    }
+    if (ga.directed()) {
+        emitMetric(std::cerr, "averageFlow", ogdf::LayoutStatistics::averageFlow(ga));
+        emitMetric(std::cerr, "upwardsFlow", ogdf::LayoutStatistics::upwardsFlow(ga));
+    }
     if (calculateCrossings) {
-        std::cerr << " crossings=" << (crossingSum / 2);
+        emitMetric(std::cerr, "crossings", crossingSum / 2);
+        emitMetric(std::cerr, "crossingPercentage", ogdf::LayoutStatistics::percentageCrossingVsMaxCrossings(ga));
+    }
+    if (calculateNodeCrossings) {
+        emitMetric(std::cerr, "nodeCrossings", nodeCrossingSum);
     }
     std::cerr << std::endl;
 }
@@ -474,6 +617,7 @@ int main() {
             applyGeneratedLayout(ga, toLower(generatorRequest.generator), generatorRequest.secondary);
             ensureFiniteNodePositions(ga);
         } else {
+            const bool metricsOnly = isMetricsRequest(graphMlInput);
             LayoutRequest request = parseLayoutRequest(graphMlInput);
             std::istringstream input(graphMlInput);
             if (!ogdf::GraphIO::readGraphML(ga, g, input)) {
@@ -482,11 +626,18 @@ int main() {
             }
 
             ensureNodeSizes(ga);
-            runSelectedLayout(ga, request);
+            long long layoutRuntimeMs = 0;
+            if (!metricsOnly) {
+                const auto layoutStart = std::chrono::steady_clock::now();
+                runSelectedLayout(ga, request);
+                const auto layoutEnd = std::chrono::steady_clock::now();
+                layoutRuntimeMs =
+                        std::chrono::duration_cast<std::chrono::milliseconds>(layoutEnd - layoutStart).count();
+            }
             ensureFiniteNodePositions(ga);
 
-            if (request.includeMetrics) {
-                emitMetrics(g, ga);
+            if (metricsOnly || request.includeMetrics) {
+                emitMetrics(g, ga, layoutRuntimeMs, metricsOnly ? "" : "layoutRuntimeMs");
             }
         }
 

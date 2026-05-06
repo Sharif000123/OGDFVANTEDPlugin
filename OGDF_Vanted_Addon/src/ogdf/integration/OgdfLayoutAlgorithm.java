@@ -20,6 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -57,6 +58,9 @@ import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
 
 public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
+    private static final String METRIC_NODE_ORTHOGONALITY_LABEL =
+            "Grid-aligned nodes (%) (Node-Orthogonality)";
+
 
     // GraphML keys and user-configurable runtime lookup names.
     private static final Preferences PREFS = Preferences.userNodeForPackage(OgdfLayoutAlgorithm.class);
@@ -70,12 +74,17 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
     private static final String KEY_EDGE_ID = "edgeid";
     private static final String KEY_EDGE_LABEL = "edgelabel";
     private static final String KEY_EDGE_BENDS = "bends";
+    private static final String KEY_OGDF_MODE = "ogdf.mode";
     private static final String KEY_LAYOUT_ID = "ogdf.layout";
     private static final String KEY_LAYOUT_ITERATIONS = "ogdf.iterations";
     private static final String KEY_LAYOUT_SECONDARY_ITERATIONS = "ogdf.secondaryIterations";
     private static final String KEY_LAYOUT_PAGE_RATIO = "ogdf.pageRatio";
     private static final String KEY_LAYOUT_TRANSPOSE = "ogdf.transpose";
     private static final String KEY_LAYOUT_INCLUDE_METRICS = "ogdf.includeMetrics";
+    private static final String KEY_LAYOUT_HEURISTIC_ONE = "ogdf.heuristic.one";
+    private static final String KEY_LAYOUT_HEURISTIC_TWO = "ogdf.heuristic.two";
+    private static final String KEY_LAYOUT_HEURISTIC_THREE = "ogdf.heuristic.three";
+    private static final String KEY_LAYOUT_HEURISTIC_FOUR = "ogdf.heuristic.four";
     private static final String METRIC_PREFIX = "OGDF_METRIC";
 
     private static final String ENV_LAYOUT_EXE = "OGDF_LAYOUT_EXE";
@@ -95,6 +104,10 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
     private static final String PREF_LAYOUT_PAGE_RATIO = "layoutPageRatio";
     private static final String PREF_LAYOUT_TRANSPOSE = "layoutTranspose";
     private static final String PREF_LAYOUT_INCLUDE_METRICS = "layoutIncludeMetrics";
+    private static final String PREF_LAYOUT_HEURISTIC_ONE = "layoutHeuristicOne";
+    private static final String PREF_LAYOUT_HEURISTIC_TWO = "layoutHeuristicTwo";
+    private static final String PREF_LAYOUT_HEURISTIC_THREE = "layoutHeuristicThree";
+    private static final String PREF_LAYOUT_HEURISTIC_FOUR = "layoutHeuristicFour";
     private static final String[] LAYOUT_EXECUTABLE_BASE_NAMES = {
             "ogdf_layout_fixed",
             "metrics_layout"
@@ -110,6 +123,10 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
     private static final int OPTION_PAGE_RATIO = 4;
     private static final int OPTION_TRANSPOSE = 5;
     private static final int OPTION_INCLUDE_METRICS = 6;
+    private static final int OPTION_HEURISTIC_ONE = 7;
+    private static final int OPTION_HEURISTIC_TWO = 8;
+    private static final int OPTION_HEURISTIC_THREE = 9;
+    private static final int OPTION_HEURISTIC_FOUR = 10;
     private static final String[] LAYOUT_IDS = {
             "sugiyama",
             "fmmm",
@@ -139,7 +156,7 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
             "Linear",
             "Tree",
             "Radial tree",
-            "Planarization",
+            "Orthogonal (planarization)",
             "Pivot MDS"
     };
     private static final String[] LAYOUT_DESCRIPTIONS = {
@@ -155,7 +172,7 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
             "Places nodes along a line; useful for ordering, not dense readability.",
             "Tree/forest drawing; requires a graph without undirected cycles.",
             "Radial tree drawing; requires one connected tree.",
-            "Planarization-based layout for general graphs.",
+            "Orthogonal drawing via planarization; useful for bend-aware graph drawings.",
             "Multidimensional scaling layout; requires a connected graph."
     };
     private static final String[] LAYOUT_ITERATION_LABELS = {
@@ -171,7 +188,7 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
             "Iterations",
             "Iterations",
             "Iterations",
-            "Iterations",
+            "Crossing permutations",
             "Iterations"
     };
     private static final String[] LAYOUT_SECONDARY_LABELS = {
@@ -187,14 +204,14 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
             "Secondary iterations",
             "Secondary iterations",
             "Secondary iterations",
-            "Secondary iterations",
+            "Bend bound",
             "Secondary iterations"
     };
     private static final boolean[] LAYOUT_USES_ITERATIONS = {
-            true, true, true, true, true, true, false, false, false, false, false, false, false, false
+            true, true, true, true, true, true, false, false, false, false, false, false, true, false
     };
     private static final boolean[] LAYOUT_USES_SECONDARY_ITERATIONS = {
-            true, true, false, false, true, false, false, false, false, false, false, false, false, false
+            true, true, false, false, true, false, false, false, false, false, false, false, true, false
     };
     private static final boolean[] LAYOUT_USES_PAGE_RATIO = {
             true, false, false, false, false, false, false, true, false, false, false, false, true, false
@@ -203,10 +220,10 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
             true, false, false, false, false, false, false, false, false, false, false, false, false, false
     };
     private static final int[] LAYOUT_DEFAULT_ITERATIONS = {
-            15, 30, 200, 400, 200, 10, 0, 0, 0, 0, 0, 0, 0, 0
+            15, 30, 200, 400, 200, 10, 0, 0, 0, 0, 0, 0, 4, 0
     };
     private static final int[] LAYOUT_DEFAULT_SECONDARY_ITERATIONS = {
-            4, 20, 0, 0, 200, 0, 0, 0, 0, 0, 0, 0, 0, 0
+            4, 20, 0, 0, 200, 0, 0, 0, 0, 0, 0, 0, 2, 0
     };
     private static final double[] LAYOUT_DEFAULT_PAGE_RATIOS = {
             1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0
@@ -300,7 +317,7 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
                 return;
             }
 
-            Map<String, Long> metrics = parseMetrics(stderr);
+            Map<String, String> metrics = parseMetrics(stderr);
             String nonMetricStderr = extractNonMetricStderr(stderr);
             double[] layoutTransform = createLayoutTransform(layoutResult, nodeList, edgeList);
 
@@ -400,18 +417,29 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
     }
 
     // Serializes VANTED graph data into OGDF-readable GraphML.
-    private static String buildGraphMlRequest(Graph graph, List<Node> nodeList, List<Edge> edgeList,
+    static String buildGraphMlRequest(Graph graph, List<Node> nodeList, List<Edge> edgeList,
             Map<Node, Integer> nodeToIndex, Object[] layoutOptions) {
+        return buildGraphMlRequest(graph, nodeList, edgeList, nodeToIndex, layoutOptions, "layout");
+    }
+
+    // Serializes VANTED graph data into OGDF-readable GraphML with an explicit bridge mode.
+    static String buildGraphMlRequest(Graph graph, List<Node> nodeList, List<Edge> edgeList,
+            Map<Node, Integer> nodeToIndex, Object[] layoutOptions, String bridgeMode) {
         StringBuilder sb = new StringBuilder(Math.max(4096, nodeList.size() * 160 + edgeList.size() * 90));
         sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         sb.append("<graphml>\n");
 
+        appendKey(sb, "k_ogdf_mode", "graph", KEY_OGDF_MODE, "string");
         appendKey(sb, "k_ogdf_layout", "graph", KEY_LAYOUT_ID, "string");
         appendKey(sb, "k_ogdf_iterations", "graph", KEY_LAYOUT_ITERATIONS, "int");
         appendKey(sb, "k_ogdf_secondary_iterations", "graph", KEY_LAYOUT_SECONDARY_ITERATIONS, "int");
         appendKey(sb, "k_ogdf_page_ratio", "graph", KEY_LAYOUT_PAGE_RATIO, "double");
         appendKey(sb, "k_ogdf_transpose", "graph", KEY_LAYOUT_TRANSPOSE, "boolean");
         appendKey(sb, "k_ogdf_include_metrics", "graph", KEY_LAYOUT_INCLUDE_METRICS, "boolean");
+        appendKey(sb, "k_ogdf_heuristic_one", "graph", KEY_LAYOUT_HEURISTIC_ONE, "string");
+        appendKey(sb, "k_ogdf_heuristic_two", "graph", KEY_LAYOUT_HEURISTIC_TWO, "string");
+        appendKey(sb, "k_ogdf_heuristic_three", "graph", KEY_LAYOUT_HEURISTIC_THREE, "string");
+        appendKey(sb, "k_ogdf_heuristic_four", "graph", KEY_LAYOUT_HEURISTIC_FOUR, "string");
         appendKey(sb, "k_nodeid", "node", KEY_NODE_ID, "int");
         appendKey(sb, "k_x", "node", KEY_X, "double");
         appendKey(sb, "k_y", "node", KEY_Y, "double");
@@ -425,12 +453,17 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
         sb.append("  <graph id=\"G\" edgedefault=\"")
                 .append(graph.isDirected() ? "directed" : "undirected")
                 .append("\">\n");
+        appendData(sb, "k_ogdf_mode", bridgeMode == null || bridgeMode.trim().isEmpty() ? "layout" : bridgeMode);
         appendData(sb, "k_ogdf_layout", optionString(layoutOptions, OPTION_LAYOUT_ID, LAYOUT_IDS[0]));
         appendData(sb, "k_ogdf_iterations", Integer.toString(optionInt(layoutOptions, OPTION_ITERATIONS, LAYOUT_DEFAULT_ITERATIONS[0])));
         appendData(sb, "k_ogdf_secondary_iterations", Integer.toString(optionInt(layoutOptions, OPTION_SECONDARY_ITERATIONS, LAYOUT_DEFAULT_SECONDARY_ITERATIONS[0])));
         appendData(sb, "k_ogdf_page_ratio", Double.toString(optionDouble(layoutOptions, OPTION_PAGE_RATIO, LAYOUT_DEFAULT_PAGE_RATIOS[0])));
         appendData(sb, "k_ogdf_transpose", Boolean.toString(optionBoolean(layoutOptions, OPTION_TRANSPOSE, LAYOUT_DEFAULT_TRANSPOSE[0])));
         appendData(sb, "k_ogdf_include_metrics", Boolean.toString(optionBoolean(layoutOptions, OPTION_INCLUDE_METRICS, false)));
+        appendData(sb, "k_ogdf_heuristic_one", optionString(layoutOptions, OPTION_HEURISTIC_ONE, ""));
+        appendData(sb, "k_ogdf_heuristic_two", optionString(layoutOptions, OPTION_HEURISTIC_TWO, ""));
+        appendData(sb, "k_ogdf_heuristic_three", optionString(layoutOptions, OPTION_HEURISTIC_THREE, ""));
+        appendData(sb, "k_ogdf_heuristic_four", optionString(layoutOptions, OPTION_HEURISTIC_FOUR, ""));
 
         // nodeid is the stable VANTED mapping; OGDF may rewrite XML node IDs.
         for (Node node : nodeList) {
@@ -816,8 +849,8 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
     }
 
     // Extracts metric values (crossings, bends, etc.) from OGDF stderr output.
-    private static Map<String, Long> parseMetrics(String stderr) {
-        Map<String, Long> result = new HashMap<>();
+    static Map<String, String> parseMetrics(String stderr) {
+        Map<String, String> result = new LinkedHashMap<>();
         if (stderr == null || stderr.isEmpty()) {
             return result;
         }
@@ -838,7 +871,7 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
                     continue;
                 }
                 String key = token.substring(0, eqPos);
-                Long value = tryParseLong(token.substring(eqPos + 1));
+                String value = cleanMetricValue(token.substring(eqPos + 1));
                 if (!key.isEmpty() && value != null) {
                     result.put(key, value);
                 }
@@ -848,7 +881,7 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
     }
 
     // Filters out metric lines from stderr, returning only error/warning messages.
-    private static String extractNonMetricStderr(String stderr) {
+    static String extractNonMetricStderr(String stderr) {
         if (stderr == null || stderr.isEmpty()) {
             return "";
         }
@@ -868,32 +901,30 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
     }
 
     // Stores OGDF metrics as graph attributes for user access.
-    private static void applyMetricsToGraph(Graph graph, Map<String, Long> metrics) {
+    static void applyMetricsToGraph(Graph graph, Map<String, String> metrics) {
         if (graph == null || metrics == null || metrics.isEmpty()) {
             return;
         }
-        setGraphMetric(graph, metrics, "crossings");
-        setGraphMetric(graph, metrics, "bends");
-        setGraphMetric(graph, metrics, "nodeOverlaps");
-        setGraphMetric(graph, metrics, "nodes");
-        setGraphMetric(graph, metrics, "edges");
+        for (String key : metrics.keySet()) {
+            setGraphMetric(graph, metrics, key);
+        }
     }
 
     // Sets a single metric attribute on the graph under the "ogdf" namespace.
-    private static void setGraphMetric(Graph graph, Map<String, Long> metrics, String key) {
-        Long value = metrics.get(key);
+    private static void setGraphMetric(Graph graph, Map<String, String> metrics, String key) {
+        String value = metrics.get(key);
         if (value == null) {
             return;
         }
         try {
-            AttributeHelper.setAttribute(graph, "ogdf", key, Integer.valueOf(value.intValue()));
+            AttributeHelper.setAttribute(graph, "ogdf", key, metricAttributeValue(value));
         } catch (RuntimeException ignored) {
             // Ignore metric mapping errors; layout itself is already complete.
         }
     }
 
     // Formats metrics map into human-readable string (e.g., "crossings=5, bends=2").
-    private static String formatMetrics(Map<String, Long> metrics) {
+    static String formatMetrics(Map<String, String> metrics) {
         List<String> parts = new ArrayList<>();
         appendMetricPart(parts, metrics, "crossings");
         appendMetricPart(parts, metrics, "bends");
@@ -901,7 +932,7 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
         appendMetricPart(parts, metrics, "nodes");
         appendMetricPart(parts, metrics, "edges");
         if (parts.isEmpty()) {
-            for (Map.Entry<String, Long> entry : metrics.entrySet()) {
+            for (Map.Entry<String, String> entry : metrics.entrySet()) {
                 parts.add(entry.getKey() + "=" + entry.getValue());
             }
         }
@@ -909,45 +940,83 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
     }
 
     // Adds one metric if present.
-    private static void appendMetricPart(List<String> parts, Map<String, Long> metrics, String key) {
-        Long value = metrics.get(key);
+    private static void appendMetricPart(List<String> parts, Map<String, String> metrics, String key) {
+        String value = metrics.get(key);
         if (value != null) {
             parts.add(key + "=" + value);
         }
     }
 
-    private static void showMetricsDialog(Map<String, Long> metrics) {
+    static void showMetricsDialog(Map<String, String> metrics) {
         if (!isUiAvailable() || metrics == null || metrics.isEmpty()) {
             return;
         }
 
         JTextArea textArea = new JTextArea(formatMetricsForCopy(metrics));
         textArea.setEditable(false);
-        textArea.setColumns(34);
-        textArea.setRows(8);
+        textArea.setColumns(54);
+        textArea.setRows(24);
         textArea.setLineWrap(false);
         textArea.setWrapStyleWord(false);
         textArea.setCaretPosition(0);
 
-        JOptionPane.showMessageDialog(null, textArea, "OGDF Metrics", JOptionPane.INFORMATION_MESSAGE);
+        JScrollPane scrollPane = new JScrollPane(textArea);
+        scrollPane.setPreferredSize(new Dimension(520, 420));
+        JOptionPane.showMessageDialog(null, scrollPane, "OGDF Metrics", JOptionPane.INFORMATION_MESSAGE);
     }
 
-    private static String formatMetricsForCopy(Map<String, Long> metrics) {
-        StringBuilder sb = new StringBuilder(128);
-        sb.append("OGDF Metrics\n\n");
-        appendMetricLine(sb, metrics, "crossings", "Crossings");
-        appendMetricLine(sb, metrics, "bends", "Bends");
-        appendMetricLine(sb, metrics, "nodeOverlaps", "Node overlaps");
-        appendMetricLine(sb, metrics, "nodes", "Nodes");
-        appendMetricLine(sb, metrics, "edges", "Edges");
+    private static String formatMetricsForCopy(Map<String, String> metrics) {
+        StringBuilder sb = new StringBuilder(512);
+        sb.append("Graph Metrics\n\n");
+
+        String[][] structureMetrics = {
+                {"nodes", "Nodes"},
+                {"edges", "Edges"},
+                {"density", "Density"},
+                {"components", "Connected components"},
+                {"isolatedNodes", "Isolated nodes"},
+                {"avgDegree", "Average degree"},
+                {"minDegree", "Minimum degree"},
+                {"maxDegree", "Maximum degree"}
+        };
+        String[][] qualityMetrics = {
+                {"crossings", "Crossings"},
+                {"crossingPercentage", "Crossings vs. maximum (%)"},
+                {"nodeCrossings", "Node crossings"},
+                {"bends", "Bends"},
+                {"nodeOverlaps", "Node overlaps"},
+                {"layoutRuntimeMs", "Layout runtime (ms)"}
+        };
+        String[][] layoutStatisticsMetrics = {
+                {"graphArea", "Drawing area"},
+                {"aspectRatio", "Aspect ratio"},
+                {"minEdgeLength", "Minimum edge length"},
+                {"avgEdgeLength", "Average edge length"},
+                {"maxEdgeLength", "Maximum edge length"},
+                {"edgeLengthDeviation", "Edge length deviation"},
+                {"nodeResolution", "Node resolution"},
+                {"angularResolution", "Angular resolution"},
+                {"nodeUniformity", "Node uniformity"},
+                {"edgeOrthogonality", "Edge orthogonality"},
+                {"closestPairDistance", "Closest node distance"},
+                {"horizontalBalance", "Horizontal balance"},
+                {"verticalBalance", "Vertical balance"},
+                {"nodeOrthogonality", METRIC_NODE_ORTHOGONALITY_LABEL},
+                {"neighbourhoodPreservation", "Neighbourhood preservation"},
+                {"gabrielRatio", "Gabriel ratio"}
+        };
+        String[][] directedMetrics = {
+                {"averageFlow", "Average flow"},
+                {"upwardsFlow", "Upwards flow (%)"}
+        };
 
         Set<String> known = new LinkedHashSet<>();
-        known.add("crossings");
-        known.add("bends");
-        known.add("nodeOverlaps");
-        known.add("nodes");
-        known.add("edges");
-        for (Map.Entry<String, Long> entry : metrics.entrySet()) {
+        appendMetricSection(sb, known, metrics, "Structure", structureMetrics);
+        appendMetricSection(sb, known, metrics, "Layout quality", qualityMetrics);
+        appendMetricSection(sb, known, metrics, "OGDF LayoutStatistics", layoutStatisticsMetrics);
+        appendMetricSection(sb, known, metrics, "Directed flow", directedMetrics);
+
+        for (Map.Entry<String, String> entry : metrics.entrySet()) {
             if (!known.contains(entry.getKey())) {
                 sb.append(entry.getKey()).append(": ").append(entry.getValue()).append('\n');
             }
@@ -955,11 +1024,68 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
         return sb.toString().trim();
     }
 
-    private static void appendMetricLine(StringBuilder sb, Map<String, Long> metrics, String key, String label) {
-        Long value = metrics.get(key);
+    private static void appendMetricSection(StringBuilder sb, Set<String> known, Map<String, String> metrics,
+            String title, String[][] metricSpecs) {
+        StringBuilder section = new StringBuilder();
+        for (String[] metricSpec : metricSpecs) {
+            if (metricSpec.length >= 2) {
+                known.add(metricSpec[0]);
+                appendMetricLine(section, metrics, metricSpec[0], metricSpec[1]);
+            }
+        }
+        if (section.length() > 0) {
+            sb.append(title).append('\n');
+            sb.append(section).append('\n');
+        }
+    }
+
+    private static void appendMetricLine(StringBuilder sb, Map<String, String> metrics, String key, String label) {
+        String value = metrics.get(key);
         if (value != null) {
             sb.append(label).append(": ").append(value).append('\n');
         }
+    }
+
+    private static String cleanMetricValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        Double parsed = tryParseDouble(trimmed);
+        return parsed == null ? null : formatMetricValue(parsed.doubleValue());
+    }
+
+    private static String formatMetricValue(double value) {
+        if (!isFinite(value)) {
+            return "";
+        }
+        double rounded = Math.rint(value);
+        if (Math.abs(value - rounded) < 0.0000001 && rounded <= Long.MAX_VALUE && rounded >= Long.MIN_VALUE) {
+            return Long.toString((long) rounded);
+        }
+        return String.format(java.util.Locale.US, "%.4f", Double.valueOf(value)).replaceAll("0+$", "").replaceAll("\\.$", "");
+    }
+
+    private static Object metricAttributeValue(String value) {
+        if (value == null) {
+            return "";
+        }
+        if (value.indexOf('.') >= 0) {
+            Double parsedDouble = tryParseDouble(value);
+            return parsedDouble == null ? value : parsedDouble;
+        }
+        Long parsedLong = tryParseLong(value);
+        if (parsedLong != null) {
+            if (parsedLong.longValue() <= Integer.MAX_VALUE && parsedLong.longValue() >= Integer.MIN_VALUE) {
+                return Integer.valueOf(parsedLong.intValue());
+            }
+            return parsedLong;
+        }
+        Double parsedDouble = tryParseDouble(value);
+        return parsedDouble == null ? value : parsedDouble;
     }
 
     // Safely parses an integer string, returning null on failure.
@@ -1120,6 +1246,18 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
         transposeBox.setSelected(PREFS.getBoolean(PREF_LAYOUT_TRANSPOSE, LAYOUT_DEFAULT_TRANSPOSE[selectedLayoutIndex]));
         JCheckBox metricsBox = new JCheckBox();
         metricsBox.setSelected(readIncludeMetricsPreference(selectedLayoutIndex));
+        JComboBox<String> heuristicOneBox = new JComboBox<>();
+        JComboBox<String> heuristicTwoBox = new JComboBox<>();
+        JComboBox<String> heuristicThreeBox = new JComboBox<>();
+        JComboBox<String> heuristicFourBox = new JComboBox<>();
+        configureHeuristicBox(heuristicOneBox, selectedLayoutIndex, 1,
+                PREFS.get(PREF_LAYOUT_HEURISTIC_ONE, defaultHeuristicValue(selectedLayoutIndex, 1)));
+        configureHeuristicBox(heuristicTwoBox, selectedLayoutIndex, 2,
+                PREFS.get(PREF_LAYOUT_HEURISTIC_TWO, defaultHeuristicValue(selectedLayoutIndex, 2)));
+        configureHeuristicBox(heuristicThreeBox, selectedLayoutIndex, 3,
+                PREFS.get(PREF_LAYOUT_HEURISTIC_THREE, defaultHeuristicValue(selectedLayoutIndex, 3)));
+        configureHeuristicBox(heuristicFourBox, selectedLayoutIndex, 4,
+                PREFS.get(PREF_LAYOUT_HEURISTIC_FOUR, defaultHeuristicValue(selectedLayoutIndex, 4)));
 
         JPanel panel = new JPanel(new GridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
@@ -1145,11 +1283,15 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
         JLabel secondaryIterationsLabel = addDialogRow(panel, gbc, 4, "Secondary iterations", secondaryIterationsSpinner);
         JLabel pageRatioLabel = addDialogRow(panel, gbc, 5, "Page ratio", pageRatioSpinner);
         JLabel transposeLabel = addDialogRow(panel, gbc, 6, "Transpose step", transposeBox);
-        addDialogRow(panel, gbc, 7, "Calculate metrics", metricsBox);
+        JLabel heuristicOneLabel = addDialogRow(panel, gbc, 7, "Heuristic", heuristicOneBox);
+        JLabel heuristicTwoLabel = addDialogRow(panel, gbc, 8, "Heuristic", heuristicTwoBox);
+        JLabel heuristicThreeLabel = addDialogRow(panel, gbc, 9, "Heuristic", heuristicThreeBox);
+        JLabel heuristicFourLabel = addDialogRow(panel, gbc, 10, "Heuristic", heuristicFourBox);
+        addDialogRow(panel, gbc, 11, "Calculate metrics", metricsBox);
 
         JLabel note = new JLabel("<html>Only supported inputs are shown. Use 0 for an OGDF default where available.</html>");
         gbc.gridx = 0;
-        gbc.gridy = 8;
+        gbc.gridy = 12;
         gbc.gridwidth = 2;
         panel.add(note, gbc);
 
@@ -1160,25 +1302,38 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
             pageRatioSpinner.setValue(Double.valueOf(LAYOUT_DEFAULT_PAGE_RATIOS[index]));
             transposeBox.setSelected(LAYOUT_DEFAULT_TRANSPOSE[index]);
             metricsBox.setSelected(false);
+            configureHeuristicBox(heuristicOneBox, index, 1, defaultHeuristicValue(index, 1));
+            configureHeuristicBox(heuristicTwoBox, index, 2, defaultHeuristicValue(index, 2));
+            configureHeuristicBox(heuristicThreeBox, index, 3, defaultHeuristicValue(index, 3));
+            configureHeuristicBox(heuristicFourBox, index, 4, defaultHeuristicValue(index, 4));
             updateLayoutDialog(index, graph, descriptionLabel, compatibilityLabel,
                     iterationsLabel, iterationsSpinner, secondaryIterationsLabel, secondaryIterationsSpinner,
-                    pageRatioLabel, pageRatioSpinner, transposeLabel, transposeBox);
+                    pageRatioLabel, pageRatioSpinner, transposeLabel, transposeBox,
+                    heuristicOneLabel, heuristicOneBox, heuristicTwoLabel, heuristicTwoBox,
+                    heuristicThreeLabel, heuristicThreeBox, heuristicFourLabel, heuristicFourBox);
             resizeDialogToContent(panel);
         });
         updateLayoutDialog(selectedLayoutIndex, graph, descriptionLabel, compatibilityLabel,
                 iterationsLabel, iterationsSpinner, secondaryIterationsLabel, secondaryIterationsSpinner,
-                pageRatioLabel, pageRatioSpinner, transposeLabel, transposeBox);
+                pageRatioLabel, pageRatioSpinner, transposeLabel, transposeBox,
+                heuristicOneLabel, heuristicOneBox, heuristicTwoLabel, heuristicTwoBox,
+                heuristicThreeLabel, heuristicThreeBox, heuristicFourLabel, heuristicFourBox);
 
         if (!showLayoutOptionsDialog(panel)) {
             return null;
         }
 
-        Object[] options = createLayoutOptions(selectedLayoutIndex(algorithmBox),
+        int resultLayoutIndex = selectedLayoutIndex(algorithmBox);
+        Object[] options = createLayoutOptions(resultLayoutIndex,
                 ((Number) iterationsSpinner.getValue()).intValue(),
                 ((Number) secondaryIterationsSpinner.getValue()).intValue(),
                 ((Number) pageRatioSpinner.getValue()).doubleValue(),
                 transposeBox.isSelected(),
-                metricsBox.isSelected());
+                metricsBox.isSelected(),
+                selectedHeuristicValue(heuristicOneBox, resultLayoutIndex, 1),
+                selectedHeuristicValue(heuristicTwoBox, resultLayoutIndex, 2),
+                selectedHeuristicValue(heuristicThreeBox, resultLayoutIndex, 3),
+                selectedHeuristicValue(heuristicFourBox, resultLayoutIndex, 4));
         rememberLayoutOptions(options);
         return options;
     }
@@ -1248,11 +1403,152 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
         return labelComponent;
     }
 
+    private static void configureHeuristicBox(JComboBox<String> box, int layoutIndex, int slot, String selectedValue) {
+        String[][] specs = heuristicSpecs(layoutIndex, slot);
+        box.removeAllItems();
+        for (String[] spec : specs) {
+            box.addItem(spec[1]);
+        }
+        int selectedIndex = heuristicIndex(specs, selectedValue);
+        if (selectedIndex >= 0 && box.getItemCount() > 0) {
+            box.setSelectedIndex(selectedIndex);
+        }
+    }
+
+    private static String selectedHeuristicValue(JComboBox<String> box, int layoutIndex, int slot) {
+        String[][] specs = heuristicSpecs(layoutIndex, slot);
+        if (specs.length == 0 || box.getSelectedIndex() < 0) {
+            return "";
+        }
+        int index = Math.min(box.getSelectedIndex(), specs.length - 1);
+        return specs[index][0];
+    }
+
+    private static void updateHeuristicRow(int layoutIndex, int slot, JLabel label, java.awt.Component editor) {
+        String rowLabel = heuristicRowLabel(layoutIndex, slot);
+        label.setText(rowLabel == null ? "Heuristic" : rowLabel);
+        setDialogRowVisible(label, editor, heuristicSpecs(layoutIndex, slot).length > 0);
+    }
+
+    private static int heuristicIndex(String[][] specs, String selectedValue) {
+        if (specs.length == 0) {
+            return -1;
+        }
+        String cleaned = selectedValue == null ? "" : selectedValue.trim();
+        for (int i = 0; i < specs.length; i++) {
+            if (specs[i][0].equalsIgnoreCase(cleaned)) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    private static String defaultHeuristicValue(int layoutIndex, int slot) {
+        String[][] specs = heuristicSpecs(layoutIndex, slot);
+        return specs.length == 0 ? "" : specs[0][0];
+    }
+
+    private static String heuristicRowLabel(int layoutIndex, int slot) {
+        String id = LAYOUT_IDS[safeLayoutIndex(layoutIndex)];
+        if ("sugiyama".equals(id)) {
+            switch (slot) {
+            case 1:
+                return "Ranking heuristic";
+            case 2:
+                return "Crossing heuristic";
+            case 3:
+                return "Coordinate assignment";
+            default:
+                return null;
+            }
+        }
+        if ("planarization".equals(id)) {
+            switch (slot) {
+            case 1:
+                return "Planar subgraph";
+            case 2:
+                return "Edge insertion";
+            case 3:
+                return "Embedder";
+            case 4:
+                return "Orthogonal model";
+            default:
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private static String[][] heuristicSpecs(int layoutIndex, int slot) {
+        String id = LAYOUT_IDS[safeLayoutIndex(layoutIndex)];
+        if ("sugiyama".equals(id)) {
+            switch (slot) {
+            case 1:
+                return new String[][] {
+                        {"longest_path", "Longest path"},
+                        {"optimal", "Optimal ranking"},
+                        {"coffman_graham", "Coffman-Graham"}
+                };
+            case 2:
+                return new String[][] {
+                        {"barycenter", "Barycenter"},
+                        {"median", "Median"},
+                        {"sifting", "Sifting"},
+                        {"greedy_switch", "Greedy switch"},
+                        {"greedy_insert", "Greedy insert"}
+                };
+            case 3:
+                return new String[][] {
+                        {"fast_hierarchy", "Fast hierarchy"},
+                        {"fast_simple", "Fast simple"},
+                        {"optimal", "Optimal hierarchy"}
+                };
+            default:
+                return new String[0][0];
+            }
+        }
+        if ("planarization".equals(id)) {
+            switch (slot) {
+            case 1:
+                return new String[][] {
+                        {"fast", "Fast planar subgraph"},
+                        {"boyer_myrvold", "Boyer-Myrvold"}
+                };
+            case 2:
+                return new String[][] {
+                        {"variable", "Variable embedding"},
+                        {"variable_dynamic", "Dynamic variable embedding"},
+                        {"fixed", "Fixed embedding"}
+                };
+            case 3:
+                return new String[][] {
+                        {"simple", "Simple embedder"},
+                        {"min_depth_max_face", "Min-depth max-face"},
+                        {"max_face", "Maximum external face"}
+                };
+            case 4:
+                return new String[][] {
+                        {"progressive", "Progressive"},
+                        {"traditional", "Traditional"},
+                        {"progressive_scaled", "Progressive + scaling"},
+                        {"traditional_scaled", "Traditional + scaling"}
+                };
+            default:
+                return new String[0][0];
+            }
+        }
+        return new String[0][0];
+    }
+
     private static void updateLayoutDialog(int layoutIndex, Graph graph, JLabel descriptionLabel, JLabel compatibilityLabel,
             JLabel iterationsLabel, java.awt.Component iterationsEditor,
             JLabel secondaryIterationsLabel, java.awt.Component secondaryIterationsEditor,
             JLabel pageRatioLabel, java.awt.Component pageRatioEditor,
-            JLabel transposeLabel, java.awt.Component transposeEditor) {
+            JLabel transposeLabel, java.awt.Component transposeEditor,
+            JLabel heuristicOneLabel, java.awt.Component heuristicOneEditor,
+            JLabel heuristicTwoLabel, java.awt.Component heuristicTwoEditor,
+            JLabel heuristicThreeLabel, java.awt.Component heuristicThreeEditor,
+            JLabel heuristicFourLabel, java.awt.Component heuristicFourEditor) {
         int safeIndex = safeLayoutIndex(layoutIndex);
         descriptionLabel.setText("<html><b>" + htmlEscape(LAYOUT_NAMES[safeIndex]) + "</b>: "
                 + htmlEscape(LAYOUT_DESCRIPTIONS[safeIndex]) + "<br><b>Inputs:</b> "
@@ -1266,6 +1562,10 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
         setDialogRowVisible(secondaryIterationsLabel, secondaryIterationsEditor, LAYOUT_USES_SECONDARY_ITERATIONS[safeIndex]);
         setDialogRowVisible(pageRatioLabel, pageRatioEditor, LAYOUT_USES_PAGE_RATIO[safeIndex]);
         setDialogRowVisible(transposeLabel, transposeEditor, LAYOUT_USES_TRANSPOSE[safeIndex]);
+        updateHeuristicRow(safeIndex, 1, heuristicOneLabel, heuristicOneEditor);
+        updateHeuristicRow(safeIndex, 2, heuristicTwoLabel, heuristicTwoEditor);
+        updateHeuristicRow(safeIndex, 3, heuristicThreeLabel, heuristicThreeEditor);
+        updateHeuristicRow(safeIndex, 4, heuristicFourLabel, heuristicFourEditor);
     }
 
     private static void setDialogRowVisible(JLabel label, java.awt.Component editor, boolean visible) {
@@ -1286,6 +1586,11 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
         }
         if (LAYOUT_USES_TRANSPOSE[layoutIndex]) {
             inputs.add("Transpose step");
+        }
+        for (int slot = 1; slot <= 4; slot++) {
+            if (heuristicSpecs(layoutIndex, slot).length > 0) {
+                inputs.add(heuristicRowLabel(layoutIndex, slot));
+            }
         }
         if (inputs.isEmpty()) {
             return "No layout-specific inputs; OGDF defaults are used.";
@@ -1399,7 +1704,8 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
     }
 
     private static Object[] createLayoutOptions(int layoutIndex, int iterations, int secondaryIterations,
-            double pageRatio, boolean transpose, boolean includeMetrics) {
+            double pageRatio, boolean transpose, boolean includeMetrics,
+            String heuristicOne, String heuristicTwo, String heuristicThree, String heuristicFour) {
         int safeIndex = safeLayoutIndex(layoutIndex);
         double safePageRatio = pageRatio > 0.0 ? pageRatio : LAYOUT_DEFAULT_PAGE_RATIOS[safeIndex];
         return new Object[] {
@@ -1409,8 +1715,26 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
                 Integer.valueOf(Math.max(0, secondaryIterations)),
                 Double.valueOf(safePageRatio),
                 Boolean.valueOf(transpose),
-                Boolean.valueOf(includeMetrics)
+                Boolean.valueOf(includeMetrics),
+                sanitizeHeuristicValue(safeIndex, 1, heuristicOne),
+                sanitizeHeuristicValue(safeIndex, 2, heuristicTwo),
+                sanitizeHeuristicValue(safeIndex, 3, heuristicThree),
+                sanitizeHeuristicValue(safeIndex, 4, heuristicFour)
         };
+    }
+
+    private static String sanitizeHeuristicValue(int layoutIndex, int slot, String value) {
+        String[][] specs = heuristicSpecs(layoutIndex, slot);
+        if (specs.length == 0) {
+            return "";
+        }
+        String cleaned = value == null ? "" : value.trim();
+        for (String[] spec : specs) {
+            if (spec[0].equalsIgnoreCase(cleaned)) {
+                return spec[0];
+            }
+        }
+        return specs[0][0];
     }
 
     private static Object[] rememberedLayoutOptions(int layoutIndex) {
@@ -1420,7 +1744,11 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
                 readIntPreference(PREF_LAYOUT_SECONDARY_ITERATIONS, LAYOUT_DEFAULT_SECONDARY_ITERATIONS[safeIndex]),
                 readDoublePreference(PREF_LAYOUT_PAGE_RATIO, LAYOUT_DEFAULT_PAGE_RATIOS[safeIndex]),
                 PREFS.getBoolean(PREF_LAYOUT_TRANSPOSE, LAYOUT_DEFAULT_TRANSPOSE[safeIndex]),
-                readIncludeMetricsPreference(safeIndex));
+                readIncludeMetricsPreference(safeIndex),
+                PREFS.get(PREF_LAYOUT_HEURISTIC_ONE, defaultHeuristicValue(safeIndex, 1)),
+                PREFS.get(PREF_LAYOUT_HEURISTIC_TWO, defaultHeuristicValue(safeIndex, 2)),
+                PREFS.get(PREF_LAYOUT_HEURISTIC_THREE, defaultHeuristicValue(safeIndex, 3)),
+                PREFS.get(PREF_LAYOUT_HEURISTIC_FOUR, defaultHeuristicValue(safeIndex, 4)));
     }
 
     private static void rememberLayoutOptions(Object[] options) {
@@ -1430,6 +1758,10 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
         PREFS.putDouble(PREF_LAYOUT_PAGE_RATIO, optionDouble(options, OPTION_PAGE_RATIO, LAYOUT_DEFAULT_PAGE_RATIOS[0]));
         PREFS.putBoolean(PREF_LAYOUT_TRANSPOSE, optionBoolean(options, OPTION_TRANSPOSE, LAYOUT_DEFAULT_TRANSPOSE[0]));
         PREFS.putBoolean(PREF_LAYOUT_INCLUDE_METRICS, optionBoolean(options, OPTION_INCLUDE_METRICS, false));
+        PREFS.put(PREF_LAYOUT_HEURISTIC_ONE, optionString(options, OPTION_HEURISTIC_ONE, ""));
+        PREFS.put(PREF_LAYOUT_HEURISTIC_TWO, optionString(options, OPTION_HEURISTIC_TWO, ""));
+        PREFS.put(PREF_LAYOUT_HEURISTIC_THREE, optionString(options, OPTION_HEURISTIC_THREE, ""));
+        PREFS.put(PREF_LAYOUT_HEURISTIC_FOUR, optionString(options, OPTION_HEURISTIC_FOUR, ""));
     }
 
     private static int selectedLayoutIndex(JComboBox<String> box) {

@@ -11,6 +11,7 @@ public class OgdfTestPlugin extends GenericPluginAdapter {
         // This registers your custom algorithm in the VANTED menu
         this.algorithms = new Algorithm[] {
             new OgdfLayoutAlgorithm(),
+            new OgdfMetricsAlgorithm(),
             new OgdfGraphGeneratorAlgorithm()
         };
     }
