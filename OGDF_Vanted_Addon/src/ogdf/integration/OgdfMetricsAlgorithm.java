@@ -24,7 +24,7 @@ public class OgdfMetricsAlgorithm extends AbstractAlgorithm {
 
     @Override
     public String getCategory() {
-        return "Layout";
+        return "OGDF";
     }
 
     @Override
@@ -80,8 +80,8 @@ public class OgdfMetricsAlgorithm extends AbstractAlgorithm {
             String stderr = OgdfLayoutAlgorithm.bufferToString(stderrBuffer).trim();
 
             if (exitCode != 0) {
-                System.err.println("OGDF metrics calculation failed with exit code " + exitCode
-                        + " (" + runtime.executablePath + ").");
+                System.err.println("OGDF metrics calculation failed with exit code "
+                        + exitCode + " (" + runtime.executablePath + ").");
                 if (!stderr.isEmpty()) {
                     System.err.println("OGDF stderr: " + stderr);
                 }
@@ -106,7 +106,6 @@ public class OgdfMetricsAlgorithm extends AbstractAlgorithm {
             if (!nonMetricStderr.isEmpty()) {
                 System.err.println("OGDF stderr: " + nonMetricStderr);
             }
-            // Reuse the same copyable metrics popup as the layout dialog.
             SwingUtilities.invokeLater(() -> OgdfLayoutAlgorithm.showMetricsDialog(metrics));
         } catch (Exception ex) {
             System.err.println("Failed to calculate OGDF graph metrics:");

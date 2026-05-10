@@ -48,12 +48,14 @@ import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingUtilities;
 
 import org.AttributeHelper;
+import org.AlignmentSetting;
 import org.Vector2d;
 import org.graffiti.editor.MainFrame;
 import org.graffiti.graph.AdjListGraph;
 import org.graffiti.graph.Edge;
 import org.graffiti.graph.Graph;
 import org.graffiti.graph.Node;
+import org.graffiti.graphics.CoordinateAttribute;
 import org.graffiti.plugin.algorithm.AbstractAlgorithm;
 import org.graffiti.plugin.algorithm.Category;
 import org.graffiti.plugin.view.View;
@@ -255,8 +257,7 @@ public class OgdfGraphGeneratorAlgorithm extends AbstractAlgorithm {
         normalizeGeneratedGraph(generatedGraph, resolveGraphViewportSize(null));
         MainFrame.getInstance().showGraph(generatedGraph, new ActionEvent(this, ActionEvent.ACTION_PERFORMED, getName()));
         SwingUtilities.invokeLater(() -> {
-            normalizeGeneratedGraph(generatedGraph, resolveGraphViewportSize(generatedGraph));
-            GraphHelper.issueCompleteRedrawForActiveView();
+            GraphHelper.issueCompleteRedrawForGraph(generatedGraph);
             System.out.println("OGDF graph generated successfully (" + generatedGraph.getNumberOfNodes()
                     + " nodes, " + generatedGraph.getNumberOfEdges() + " edges).");
         });
@@ -380,13 +381,12 @@ public class OgdfGraphGeneratorAlgorithm extends AbstractAlgorithm {
                 AttributeHelper.setSize(node, width, height);
                 AttributeHelper.setShapeEllipse(node);
                 String label = data.get("label");
-                if (label != null && !label.isEmpty()) {
-                    AttributeHelper.setLabel(node, label);
-                }
+                applyGeneratedNodeLabel(node, label);
                 nodesByXmlId.put(nodeElement.getAttribute("id"), node);
             }
 
             NodeList edgeElements = document.getElementsByTagName("edge");
+            String polylineShapeClass = OgdfLayoutAlgorithm.findPolylineEdgeShapeClass();
             for (int i = 0; i < edgeElements.getLength(); i++) {
                 Element edgeElement = (Element) edgeElements.item(i);
                 Node source = nodesByXmlId.get(edgeElement.getAttribute("source"));
@@ -402,6 +402,16 @@ public class OgdfGraphGeneratorAlgorithm extends AbstractAlgorithm {
                 if (label != null && !label.isEmpty()) {
                     AttributeHelper.setLabel(edge, label);
                 }
+                List<Vector2d> bends = OgdfLayoutAlgorithm.parseEdgeBends(data.get("bends"));
+                if (!bends.isEmpty()) {
+                    AttributeHelper.removeEdgeBends(edge);
+                    for (Vector2d bend : bends) {
+                        AttributeHelper.addEdgeBend(edge, bend);
+                    }
+                    if (polylineShapeClass != null) {
+                        AttributeHelper.setEdgeBendStyle(edge, polylineShapeClass);
+                    }
+                }
             }
 
         } finally {
@@ -410,16 +420,25 @@ public class OgdfGraphGeneratorAlgorithm extends AbstractAlgorithm {
         return result;
     }
 
+    private static void applyGeneratedNodeLabel(Node node, String label) {
+        if (label == null || label.isEmpty()) {
+            return;
+        }
+        AttributeHelper.setLabel(node, label);
+        AttributeHelper.setLabelAlignment(0, node, AlignmentSetting.CENTERED);
+        AttributeHelper.setLabelOffset(node, 0.0, 0.0);
+    }
+
     private static void normalizeGeneratedGraph(Graph graph, Dimension viewportSize) {
         List<Node> nodes = new ArrayList<>(graph.getNodes());
         if (nodes.isEmpty()) {
             return;
         }
 
-        double[] sourceBounds = computeNodeBounds(nodes);
+        double[] sourceBounds = computeGraphBounds(graph, nodes);
         if (!hasBounds(sourceBounds)) {
             applyCircularFallback(nodes);
-            sourceBounds = computeNodeBounds(nodes);
+            sourceBounds = computeGraphBounds(graph, nodes);
         }
         if (!hasBounds(sourceBounds)) {
             return;
@@ -474,6 +493,15 @@ public class OgdfGraphGeneratorAlgorithm extends AbstractAlgorithm {
                 double y = AttributeHelper.getPositionY(node);
                 if (isFinite(x) && isFinite(y)) {
                     AttributeHelper.setPosition(node, x * scale + dx, y * scale + dy);
+                }
+            }
+            for (Edge edge : graph.getEdges()) {
+                for (CoordinateAttribute bend : AttributeHelper.getEdgeBendCoordinateAttributes(edge)) {
+                    double x = bend.getX();
+                    double y = bend.getY();
+                    if (isFinite(x) && isFinite(y)) {
+                        bend.setCoordinate(x * scale + dx, y * scale + dy);
+                    }
                 }
             }
         } finally {
@@ -571,6 +599,21 @@ public class OgdfGraphGeneratorAlgorithm extends AbstractAlgorithm {
 
     private static boolean validDimension(Dimension size) {
         return size != null && size.width >= 120 && size.height >= 120;
+    }
+
+    private static double[] computeGraphBounds(Graph graph, List<Node> nodes) {
+        double[] bounds = computeNodeBounds(nodes);
+        if (graph == null) {
+            return bounds;
+        }
+        for (Edge edge : graph.getEdges()) {
+            for (Vector2d bend : AttributeHelper.getEdgeBends(edge)) {
+                if (bend != null) {
+                    addBoundsPoint(bounds, bend.x, bend.y);
+                }
+            }
+        }
+        return bounds;
     }
 
     private static double[] computeNodeBounds(List<Node> nodes) {

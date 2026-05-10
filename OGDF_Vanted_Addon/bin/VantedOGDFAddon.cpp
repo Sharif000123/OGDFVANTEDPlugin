@@ -22,11 +22,32 @@
 #include <ogdf/energybased/SpringEmbedderKK.h>
 #include <ogdf/energybased/StressMinimization.h>
 #include <ogdf/fileformats/GraphIO.h>
+#include <ogdf/layered/BarycenterHeuristic.h>
+#include <ogdf/layered/CoffmanGrahamRanking.h>
+#include <ogdf/layered/FastHierarchyLayout.h>
+#include <ogdf/layered/FastSimpleHierarchyLayout.h>
+#include <ogdf/layered/GreedyInsertHeuristic.h>
+#include <ogdf/layered/GreedySwitchHeuristic.h>
+#include <ogdf/layered/LongestPathRanking.h>
+#include <ogdf/layered/MedianHeuristic.h>
+#include <ogdf/layered/OptimalHierarchyLayout.h>
+#include <ogdf/layered/OptimalRanking.h>
+#include <ogdf/layered/SiftingHeuristic.h>
 #include <ogdf/layered/SugiyamaLayout.h>
 #include <ogdf/misclayout/BalloonLayout.h>
 #include <ogdf/misclayout/CircularLayout.h>
 #include <ogdf/misclayout/LinearLayout.h>
+#include <ogdf/orthogonal/OrthoLayout.h>
+#include <ogdf/planarity/EmbedderMaxFace.h>
+#include <ogdf/planarity/EmbedderMinDepthMaxFace.h>
+#include <ogdf/planarity/FixedEmbeddingInserter.h>
 #include <ogdf/planarity/PlanarizationLayout.h>
+#include <ogdf/planarity/PlanarSubgraphBoyerMyrvold.h>
+#include <ogdf/planarity/PlanarSubgraphFast.h>
+#include <ogdf/planarity/SimpleEmbedder.h>
+#include <ogdf/planarity/SubgraphPlanarizer.h>
+#include <ogdf/planarity/VariableEmbeddingInserter.h>
+#include <ogdf/planarity/VariableEmbeddingInserterDyn.h>
 #include <ogdf/tree/RadialTreeLayout.h>
 #include <ogdf/tree/TreeLayout.h>
 
@@ -39,6 +60,10 @@ struct LayoutRequest {
     double pageRatio = 1.0;
     bool transpose = true;
     bool includeMetrics = true;
+    std::string heuristicOne;
+    std::string heuristicTwo;
+    std::string heuristicThree;
+    std::string heuristicFour;
 };
 
 struct GeneratorRequest {
@@ -162,6 +187,10 @@ LayoutRequest parseLayoutRequest(const std::string& graphMl) {
     request.pageRatio = parseDouble(graphDataValue(graphMl, "k_ogdf_page_ratio"), request.pageRatio);
     request.transpose = parseBool(graphDataValue(graphMl, "k_ogdf_transpose"), request.transpose);
     request.includeMetrics = parseBool(graphDataValue(graphMl, "k_ogdf_include_metrics"), request.includeMetrics);
+    request.heuristicOne = toLower(graphDataValue(graphMl, "k_ogdf_heuristic_one"));
+    request.heuristicTwo = toLower(graphDataValue(graphMl, "k_ogdf_heuristic_two"));
+    request.heuristicThree = toLower(graphDataValue(graphMl, "k_ogdf_heuristic_three"));
+    request.heuristicFour = toLower(graphDataValue(graphMl, "k_ogdf_heuristic_four"));
     return request;
 }
 
@@ -212,7 +241,15 @@ void runSpringFallback(ogdf::GraphAttributes& ga, int iterations, const std::str
     layout.call(ga);
 }
 
-void runBalloonFallback(ogdf::GraphAttributes& ga, const std::string& reason) {
+bool hasDisconnectedComponents(const ogdf::Graph& g) {
+    return g.numberOfNodes() > 1 && !ogdf::isConnected(g);
+}
+
+void runBalloonFallback(ogdf::GraphAttributes& ga, int iterations, const std::string& reason) {
+    if (hasDisconnectedComponents(ga.constGraph())) {
+        runSpringFallback(ga, iterations, reason + " BalloonLayout also requires a connected graph.");
+        return;
+    }
     std::cerr << "Warning: " << reason << " Falling back to Balloon layout." << std::endl;
     ogdf::BalloonLayout layout;
     layout.call(ga);
@@ -239,6 +276,83 @@ void applyGridCoordinates(ogdf::GraphAttributes& ga, int columns) {
     }
 }
 
+ogdf::RankingModule* createSugiyamaRanking(const std::string& id) {
+    if (id == "optimal") {
+        return new ogdf::OptimalRanking;
+    }
+    if (id == "coffman_graham") {
+        return new ogdf::CoffmanGrahamRanking;
+    }
+    return new ogdf::LongestPathRanking;
+}
+
+ogdf::LayeredCrossMinModule* createSugiyamaCrossMin(const std::string& id) {
+    if (id == "median") {
+        return new ogdf::MedianHeuristic;
+    }
+    if (id == "sifting") {
+        return new ogdf::SiftingHeuristic;
+    }
+    if (id == "greedy_switch") {
+        return new ogdf::GreedySwitchHeuristic;
+    }
+    if (id == "greedy_insert") {
+        return new ogdf::GreedyInsertHeuristic;
+    }
+    return new ogdf::BarycenterHeuristic;
+}
+
+ogdf::HierarchyLayoutModule* createSugiyamaCoordinateAssignment(const std::string& id) {
+    if (id == "fast_simple") {
+        return new ogdf::FastSimpleHierarchyLayout;
+    }
+    if (id == "optimal") {
+        return new ogdf::OptimalHierarchyLayout;
+    }
+    return new ogdf::FastHierarchyLayout;
+}
+
+ogdf::PlanarSubgraphModule<int>* createPlanarSubgraphHeuristic(const std::string& id, int runs) {
+    const int safeRuns = std::max(1, runs);
+    if (id == "boyer_myrvold") {
+        return new ogdf::PlanarSubgraphBoyerMyrvold(safeRuns, 0.5);
+    }
+    auto* subgraph = new ogdf::PlanarSubgraphFast<int>;
+    subgraph->runs(safeRuns);
+    return subgraph;
+}
+
+ogdf::EdgeInsertionModule* createEdgeInserterHeuristic(const std::string& id) {
+    if (id == "fixed") {
+        return new ogdf::FixedEmbeddingInserter;
+    }
+    if (id == "variable_dynamic") {
+        return new ogdf::VariableEmbeddingInserterDyn;
+    }
+    return new ogdf::VariableEmbeddingInserter;
+}
+
+ogdf::EmbedderModule* createOrthogonalEmbedder(const std::string& id) {
+    if (id == "min_depth_max_face") {
+        return new ogdf::EmbedderMinDepthMaxFace;
+    }
+    if (id == "max_face") {
+        return new ogdf::EmbedderMaxFace;
+    }
+    return new ogdf::SimpleEmbedder;
+}
+
+ogdf::OrthoLayout* createOrthogonalLayouter(const LayoutRequest& request, int bendBound) {
+    const std::string model = request.heuristicFour.empty() ? "progressive" : request.heuristicFour;
+    auto* ortho = new ogdf::OrthoLayout;
+    ortho->progressive(model != "traditional" && model != "traditional_scaled");
+    ortho->scaling(model == "progressive_scaled" || model == "traditional_scaled");
+    if (bendBound > 0) {
+        ortho->bendBound(bendBound);
+    }
+    return ortho;
+}
+
 void runSelectedLayout(ogdf::GraphAttributes& ga, const LayoutRequest& request) {
     const std::string id = toLower(request.layout);
     const int iterations = std::max(0, request.iterations);
@@ -249,6 +363,9 @@ void runSelectedLayout(ogdf::GraphAttributes& ga, const LayoutRequest& request) 
 
     if (id == "sugiyama") {
         ogdf::SugiyamaLayout layout;
+        layout.setRanking(createSugiyamaRanking(request.heuristicOne));
+        layout.setCrossMin(createSugiyamaCrossMin(request.heuristicTwo));
+        layout.setLayout(createSugiyamaCoordinateAssignment(request.heuristicThree));
         if (iterations > 0) {
             layout.runs(iterations);
         }
@@ -304,6 +421,10 @@ void runSelectedLayout(ogdf::GraphAttributes& ga, const LayoutRequest& request) 
         layout.pageRatio(pageRatio);
         layout.call(ga);
     } else if (id == "balloon") {
+        if (hasDisconnectedComponents(ga.constGraph())) {
+            runSpringFallback(ga, iterations, "BalloonLayout requires a connected graph.");
+            return;
+        }
         ogdf::BalloonLayout layout;
         layout.call(ga);
     } else if (id == "linear") {
@@ -322,7 +443,7 @@ void runSelectedLayout(ogdf::GraphAttributes& ga, const LayoutRequest& request) 
         layout.call(ga);
     } else if (id == "radial_tree") {
         if (!ogdf::isTree(ga.constGraph())) {
-            runBalloonFallback(ga, "RadialTreeLayout requires one connected tree.");
+            runBalloonFallback(ga, iterations, "RadialTreeLayout requires one connected tree.");
             return;
         }
         ogdf::RadialTreeLayout layout;
@@ -330,6 +451,14 @@ void runSelectedLayout(ogdf::GraphAttributes& ga, const LayoutRequest& request) 
         layout.call(ga);
     } else if (id == "planarization") {
         ogdf::PlanarizationLayout layout;
+        auto* crossMin = new ogdf::SubgraphPlanarizer;
+        const int permutations = iterations > 0 ? iterations : 1;
+        crossMin->permutations(permutations);
+        crossMin->setSubgraph(createPlanarSubgraphHeuristic(request.heuristicOne, permutations));
+        crossMin->setInserter(createEdgeInserterHeuristic(request.heuristicTwo));
+        layout.setCrossMin(crossMin);
+        layout.setEmbedder(createOrthogonalEmbedder(request.heuristicThree));
+        layout.setPlanarLayouter(createOrthogonalLayouter(request, secondary));
         layout.pageRatio(pageRatio);
         layout.call(ga);
     } else if (id == "pivot_mds") {
@@ -652,7 +781,7 @@ int main() {
         std::cerr << "Exception: " << e.what() << std::endl;
         return 10;
     } catch (...) {
-        std::cerr << "Unknown exception in ogdf_layout_fixed." << std::endl;
+        std::cerr << "Unknown exception in VantedOGDFAddon." << std::endl;
         return 11;
     }
 }

@@ -21,13 +21,13 @@ Important files:
   - Plugin entry class, registers algorithms.
 - `src/ogdf/integration/OgdfLayoutAlgorithm.java`
   - Java bridge logic for launching OGDF process and applying coordinates.
-- `src/ogdf_layout_fixed.cpp`
-  - C++ executable source used by the addon (`ogdf_layout_fixed.exe` on Windows, `ogdf_layout_fixed` on Linux/macOS).
+- `src/VantedOGDFAddon.cpp`
+  - C++ executable source used by the addon (`VantedOGDFAddon.exe` on Windows, `VantedOGDFAddon` on Linux/macOS).
 - `bin/`
   - Compiled Java classes + XML copied for packaging.
 - `dist/OgdfIntegration.jar`
   - Built addon package.
-- `ogdf_layout_fixed.exe`
+- `VantedOGDFAddon.exe`
   - Built native executable.
 
 Runtime addon install folder:
@@ -118,8 +118,8 @@ The generic dialog fields are mapped per algorithm. For example, main iterations
 2. Environment variable for executable: `OGDF_LAYOUT_EXE`
 3. Saved user preference (stored after first successful selection)
 4. Auto-detected sibling executable next to addon JAR:
-   - Windows: `ogdf_layout_fixed.exe`
-   - Linux/macOS: `ogdf_layout_fixed`
+   - Windows: `VantedOGDFAddon.exe`
+   - Linux/macOS: `VantedOGDFAddon`
 5. OGDF directory from `-Dogdf.dir=<folder>`, `OGDF_DIR`, or saved preference
 6. If still missing and UI is available: one-time directory chooser prompts for the OGDF folder
 
@@ -130,11 +130,10 @@ When an OGDF directory is selected, the addon searches common CMake output folde
 - `<OGDF>/ogdf/build`
 
 Recognized bridge executable names:
-- `ogdf_layout_fixed`
-- `metrics_layout`
+- `VantedOGDFAddon`
 - plus `.exe` variants on Windows
 
-Older `ogdf_layout` executables are not auto-detected because they may use the previous text protocol. If you really
+Older bridge executables are not auto-detected because they may use the previous text protocol. If you really
 need a custom executable name, set it explicitly with `-Dogdf.layout.exe=<full-path>` or `OGDF_LAYOUT_EXE`.
 
 OGDF runtime library directory is resolved from:
@@ -171,21 +170,21 @@ Output:
 
 ### Build native executable
 Compile either directly:
-- `src/ogdf_layout_fixed.cpp`
+- `src/VantedOGDFAddon.cpp`
 Against OGDF headers/libs.
 
 Or, if the OGDF checkout contains the VANTED bridge target, build it through OGDF CMake:
-- `cmake --build <OGDF>/build --target ogdf_layout_fixed`
+- `cmake --build <OGDF>/build --target VantedOGDFAddon`
 
 Output:
-- Windows: `ogdf_layout_fixed.exe`
-- Linux/macOS: `ogdf_layout_fixed`
+- Windows: `VantedOGDFAddon.exe`
+- Linux/macOS: `VantedOGDFAddon`
 
 ### Deploy
 Copy both files to:
 - `%APPDATA%\VANTED\addons\OgdfIntegration.jar`
-- Windows: `%APPDATA%\VANTED\addons\ogdf_layout_fixed.exe`
-- Linux/macOS: place `ogdf_layout_fixed` next to the addon JAR in the VANTED addon folder
+- Windows: `%APPDATA%\VANTED\addons\VantedOGDFAddon.exe`
+- Linux/macOS: place `VantedOGDFAddon` next to the addon JAR in the VANTED addon folder
 
 Restart VANTED.
 
@@ -210,7 +209,7 @@ To add more OGDF features (metrics, generation, transforms):
 5. Rebuild JAR and deploy executable + JAR to addon folder.
 
 Good next candidate:
-- Add `ogdf_metrics.exe` bridge and expose it as a VANTED analysis command.
+- Add more OGDF algorithms to the existing `VantedOGDFAddon` GraphML bridge.
 
 ---
 

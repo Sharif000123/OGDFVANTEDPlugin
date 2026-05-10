@@ -109,8 +109,7 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
     private static final String PREF_LAYOUT_HEURISTIC_THREE = "layoutHeuristicThree";
     private static final String PREF_LAYOUT_HEURISTIC_FOUR = "layoutHeuristicFour";
     private static final String[] LAYOUT_EXECUTABLE_BASE_NAMES = {
-            "ogdf_layout_fixed",
-            "metrics_layout"
+            "VantedOGDFAddon"
     };
     private static final double LAYOUT_FIT_MARGIN = 80.0;
     private static final double LAYOUT_MIN_SPREAD = 180.0;
@@ -794,7 +793,7 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
     }
 
     // Parses edge bend points from OGDF output string format "x1 y1 x2 y2 ..."
-    private static List<Vector2d> parseEdgeBends(String bendsText) {
+    static List<Vector2d> parseEdgeBends(String bendsText) {
         List<Vector2d> bends = new ArrayList<>();
         if (bendsText == null) {
             return bends;
@@ -834,7 +833,7 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
     }
 
     // Finds the edge shape class name containing "polyline" for bend rendering.
-    private static String findPolylineEdgeShapeClass() {
+    static String findPolylineEdgeShapeClass() {
         Map<String, String> edgeShapes = AttributeHelper.getEdgeShapes();
         if (edgeShapes == null || edgeShapes.isEmpty()) {
             return null;
@@ -2145,7 +2144,7 @@ public class OgdfLayoutAlgorithm extends AbstractAlgorithm {
         }
     }
 
-    // Prevents auto-loading older text-protocol executables such as ogdf_layout.exe.
+    // Prevents auto-loading older or unrelated bridge executables.
     private static boolean hasRecognizedExecutableName(String path) {
         if (path == null || path.trim().isEmpty()) {
             return false;

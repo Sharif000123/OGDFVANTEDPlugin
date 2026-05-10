@@ -241,7 +241,15 @@ void runSpringFallback(ogdf::GraphAttributes& ga, int iterations, const std::str
     layout.call(ga);
 }
 
-void runBalloonFallback(ogdf::GraphAttributes& ga, const std::string& reason) {
+bool hasDisconnectedComponents(const ogdf::Graph& g) {
+    return g.numberOfNodes() > 1 && !ogdf::isConnected(g);
+}
+
+void runBalloonFallback(ogdf::GraphAttributes& ga, int iterations, const std::string& reason) {
+    if (hasDisconnectedComponents(ga.constGraph())) {
+        runSpringFallback(ga, iterations, reason + " BalloonLayout also requires a connected graph.");
+        return;
+    }
     std::cerr << "Warning: " << reason << " Falling back to Balloon layout." << std::endl;
     ogdf::BalloonLayout layout;
     layout.call(ga);
@@ -413,6 +421,10 @@ void runSelectedLayout(ogdf::GraphAttributes& ga, const LayoutRequest& request) 
         layout.pageRatio(pageRatio);
         layout.call(ga);
     } else if (id == "balloon") {
+        if (hasDisconnectedComponents(ga.constGraph())) {
+            runSpringFallback(ga, iterations, "BalloonLayout requires a connected graph.");
+            return;
+        }
         ogdf::BalloonLayout layout;
         layout.call(ga);
     } else if (id == "linear") {
@@ -431,7 +443,7 @@ void runSelectedLayout(ogdf::GraphAttributes& ga, const LayoutRequest& request) 
         layout.call(ga);
     } else if (id == "radial_tree") {
         if (!ogdf::isTree(ga.constGraph())) {
-            runBalloonFallback(ga, "RadialTreeLayout requires one connected tree.");
+            runBalloonFallback(ga, iterations, "RadialTreeLayout requires one connected tree.");
             return;
         }
         ogdf::RadialTreeLayout layout;
@@ -769,7 +781,7 @@ int main() {
         std::cerr << "Exception: " << e.what() << std::endl;
         return 10;
     } catch (...) {
-        std::cerr << "Unknown exception in ogdf_layout_fixed." << std::endl;
+        std::cerr << "Unknown exception in VantedOGDFAddon." << std::endl;
         return 11;
     }
 }
