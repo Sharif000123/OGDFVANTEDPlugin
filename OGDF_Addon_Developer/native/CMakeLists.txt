@@ -1,0 +1,2 @@
+add_executable(VantedOGDFAddon VantedOGDFAddon.cpp)
+target_link_libraries(VantedOGDFAddon PRIVATE OGDF)

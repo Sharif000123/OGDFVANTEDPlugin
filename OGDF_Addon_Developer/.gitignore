@@ -1,0 +1,10 @@
+/java/out/
+/native/build/
+*.class
+*.jar
+*.exe
+*.dll
+*.so
+*.dylib
+.DS_Store
+Thumbs.db

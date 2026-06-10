@@ -1,9 +1,8 @@
 <?xml version="1.0" encoding="ISO-8859-1"?>
-
+<!-- This file describes the OGDF Integration plugin for VANTED-->
 <!DOCTYPE plugin
   PUBLIC "-//GRAFFITI/DTD Plugin Descriptin 1.0//EN"
    "http://vanted.ipk-gatersleben.de/dtd/1.0/plugin.dtd">
-
 <plugin>
     <author>Sharif Wurz</author>
     <description>OGDF C++ Integration for layouts and graph generation</description>
